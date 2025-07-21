@@ -57,3 +57,83 @@ class VolatilityRegimeDetector:
             'is_trending': 0.0,
             'vol_of_vol': 0.0
         }
+
+
+class MarketRegimeClassifier:
+    """
+    Classify market into different regimes for adaptive strategies
+    """
+    
+    def __init__(self, n_regimes: int = 4):
+        self.n_regimes = n_regimes
+        self.regime_centers = None
+        
+    def fit(self, returns: np.ndarray, volatilities: np.ndarray):
+        """
+        Fit regime classifier using returns and volatility data
+        """
+        from sklearn.cluster import KMeans
+        
+        # Prepare features
+        features = np.column_stack([
+            returns.mean(axis=1),  # Mean return
+            volatilities,          # Volatility
+            stats.skew(returns, axis=1),  # Skewness
+            stats.kurtosis(returns, axis=1)  # Kurtosis
+        ])
+        
+        # Cluster into regimes
+        kmeans = KMeans(n_clusters=self.n_regimes, random_state=42)
+        kmeans.fit(features)
+        
+        self.regime_centers = kmeans.cluster_centers_
+        self.kmeans = kmeans
+        
+        return self
+    
+    def predict_regime(self, recent_returns: np.ndarray, recent_volatility: float) -> int:
+        """Predict current market regime"""
+        
+        if self.kmeans is None:
+            return 0
+        
+        features = np.array([
+            np.mean(recent_returns),
+            recent_volatility,
+            stats.skew(recent_returns) if len(recent_returns) > 3 else 0,
+            stats.kurtosis(recent_returns) if len(recent_returns) > 3 else 0
+        ]).reshape(1, -1)
+        
+        regime = self.kmeans.predict(features)[0]
+        return regime
+    
+    def get_regime_characteristics(self, regime: int) -> Dict:
+        """Get characteristics of a specific regime"""
+        
+        if self.regime_centers is None:
+            return {}
+        
+        center = self.regime_centers[regime]
+        return {
+            'mean_return': center[0],
+            'volatility': center[1],
+            'skewness': center[2],
+            'kurtosis': center[3],
+            'regime_type': self._classify_regime_type(center)
+        }
+    
+    def _classify_regime_type(self, center: np.ndarray) -> str:
+        """Classify regime into human-readable type"""
+        
+        mean_return, volatility, skewness, kurtosis = center
+        
+        if mean_return > 0.001 and volatility < 0.02:
+            return "Bull Market - Low Volatility"
+        elif mean_return > 0.001 and volatility >= 0.02:
+            return "Bull Market - High Volatility"
+        elif mean_return < -0.001 and volatility < 0.02:
+            return "Bear Market - Low Volatility"
+        elif mean_return < -0.001 and volatility >= 0.02:
+            return "Bear Market - High Volatility"
+        else:
+            return "Sideways Market"
