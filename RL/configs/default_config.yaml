@@ -13,9 +13,9 @@ mdp:
 
 # Training configuration
 trainer:
-  initial_train_window: 2880000  # 2 years in minutes
-  validation_window: 259200      # 6 months in minutes
-  step_size: 43200              # 1 month in minutes
+  initial_train_window: 1051200  # 2 years in minutes
+  validation_window: 262800      # 6 months in minutes
+  step_size: 43800              # 1 month in minutes
   retrain_frequency: rolling     # rolling or expanding
   batch_size: 256
   replay_buffer_size: 1000000
