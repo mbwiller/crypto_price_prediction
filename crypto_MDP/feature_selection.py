@@ -3,8 +3,9 @@ class FeatureSelector:
     Advanced feature selection for identifying most predictive proprietary features
     """
     
-    def __init__(self, n_features_to_select: int = 100):
+    def __init__(self, n_features_to_select: int = 100, weights: Tuple[float,float,float,float] = (0.3,0.2,0.3,0.2)):
         self.n_features = n_features_to_select
+        self.weights = weights  # (mi, f_stat, rf, corr)
         self.selected_indices = None
         self.feature_scores = None
         
@@ -31,22 +32,32 @@ class FeatureSelector:
         rf.fit(X, y)
         rf_scores = rf.feature_importances_
         
-        # 4. Correlation with target
-        correlations = np.array([np.corrcoef(X[:, i], y)[0, 1] for i in range(X.shape[1])])
-        corr_scores = np.abs(correlations)
-        
+        # 4. Correlation with target (nan → 0 for constant features)
+        raw_corrs = []
+        for i in range(X.shape[1]):
+            c = np.corrcoef(X[:, i], y)[0, 1]
+            raw_corrs.append(0.0 if np.isnan(c) else c)
+        corr_scores = np.abs(np.array(raw_corrs))
+
         # Normalize scores
-        mi_scores = (mi_scores - mi_scores.min()) / (mi_scores.max() - mi_scores.min() + 1e-8)
-        f_scores = (f_scores - f_scores.min()) / (f_scores.max() - f_scores.min() + 1e-8)
-        rf_scores = (rf_scores - rf_scores.min()) / (rf_scores.max() - rf_scores.min() + 1e-8)
-        corr_scores = (corr_scores - corr_scores.min()) / (corr_scores.max() - corr_scores.min() + 1e-8)
+        def _minmax(self, arr):
+            lo, hi = arr.min(), arr.max()
+            return (arr - lo) / (hi - lo + 1e-8)
         
-        # Combine scores with weights
+        mi_scores   = self._minmax(mi_scores)
+        f_scores    = self._minmax(f_scores)
+        rf_scores   = self._minmax(rf_scores)
+        corr_scores = self._minmax(corr_scores)
+
+# =========================================================================
+# MAKE SURE WE HAVE self.weights INITIALIZED IN A CONFIG FILE OR SOMETHING
+# =========================================================================
+        w_mi, w_f, w_rf, w_corr = self.weights
         self.feature_scores = (
-            0.3 * mi_scores +
-            0.2 * f_scores +
-            0.3 * rf_scores +
-            0.2 * corr_scores
+            w_mi * mi_scores +
+            w_f * f_scores +
+            w_rf * rf_scores +
+            w_corr * corr_scores
         )
         
         # Select top features
