@@ -204,31 +204,6 @@ class CryptoPricePredictionMDP:
         # state = self.state_scaler.transform(state.reshape(1,-1))[0]
 
         return state
-
-
-
-        
-        # Penalty if CVaR exceeds risk tolerance
-        if abs(cvar) > self.risk_tolerance:
-            penalty = (abs(cvar) - self.risk_tolerance) * 10
-        else:
-            penalty = 0.0
-        
-        return penalty
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     
     def _update_histories(self, row: pd.Series):
         """Update all history buffers"""
