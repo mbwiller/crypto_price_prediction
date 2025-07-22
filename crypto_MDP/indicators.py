@@ -4,8 +4,7 @@ class TechnicalIndicators:
     def __init__(self, lookback_window: int = 100):
         self.lookback_window = lookback_window
         
-    def calculate_indicators(self, prices: np.ndarray, volumes: np.ndarray, 
-                           high: np.ndarray, low: np.ndarray, close: np.ndarray) -> Dict[str, float]:
+    def calculate_indicators(self, volumes: np.ndarray, high: np.ndarray, low: np.ndarray, close: np.ndarray) -> Dict[str, float]:
         """Calculate comprehensive technical indicators"""
         
         indicators = {}
