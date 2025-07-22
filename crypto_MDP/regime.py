@@ -12,9 +12,11 @@ class VolatilityRegimeDetector:
         # Calculate rolling volatilities
         if len(returns) < self.window_long:
             return self._default_regime()
-            
-        vol_short = np.std(returns[-self.window_short:]) * np.sqrt(252 * 24 * 60)  # Annualized
-        vol_long = np.std(returns[-self.window_long:]) * np.sqrt(252 * 24 * 60)
+
+        # CRYPTO TRADES 24/7!!
+        minutes_per_year = 365 * 24 * 60
+        vol_short = np.std(returns[-self.window_short:]) * np.sqrt(minutes_per_year)
+        vol_long  = np.std(returns[-self.window_long:])  * np.sqrt(minutes_per_year)
         
         # GARCH-style conditional volatility
         ewma_vol = self._calculate_ewma_volatility(returns)
@@ -27,7 +29,7 @@ class VolatilityRegimeDetector:
             'vol_long': vol_long,
             'vol_ratio': vol_ratio,
             'ewma_vol': ewma_vol,
-            'is_high_vol': float(vol_short > np.percentile(self.regime_history, 75) if len(self.regime_history) > 100 else vol_short > 0.5),
+            'is_high_vol': float(len(self.regime_history) > 100 and vol_short > np.percentile(self.regime_history, 75)),
             'is_trending': float(abs(np.mean(returns[-self.window_short:])) > 2 * vol_short / np.sqrt(self.window_short)),
             'vol_of_vol': np.std([np.std(returns[i:i+5]) for i in range(len(returns)-5)]) if len(returns) > 10 else 0
         }
@@ -44,7 +46,8 @@ class VolatilityRegimeDetector:
         weights = weights / weights.sum()
         weighted_returns = returns ** 2
         ewma_var = np.sum(weights * weighted_returns)
-        return np.sqrt(ewma_var) * np.sqrt(252 * 24 * 60)
+        minutes_per_year = 365 * 24 * 60
+        return np.sqrt(ewma_var) * np.sqrt(minutes_per_year)
     
     def _default_regime(self) -> Dict[str, float]:
         """Return default regime when insufficient data"""
@@ -74,13 +77,13 @@ class MarketRegimeClassifier:
         """
         from sklearn.cluster import KMeans
         
-        # Prepare features
-        features = np.column_stack([
-            returns.mean(axis=1),  # Mean return
-            volatilities,          # Volatility
-            stats.skew(returns, axis=1),  # Skewness
-            stats.kurtosis(returns, axis=1)  # Kurtosis
-        ])
+        # Ensure returns is 2D: each row=window of returns
+        R = np.atleast_2d(returns)
+        # Prepare features per window
+        means = R.mean(axis=1)
+        skews = stats.skew(R, axis=1)
+        kurts = stats.kurtosis(R, axis=1)
+        features = np.column_stack([means, volatilities, skews, kurts])
         
         # Cluster into regimes
         kmeans = KMeans(n_clusters=self.n_regimes, random_state=42)
@@ -127,6 +130,9 @@ class MarketRegimeClassifier:
         
         mean_return, volatility, skewness, kurtosis = center
         
+# ==================================================================
+        # WE SHOULD LOOK INTO THESE, AS THEY ARE HARD CODED!!
+# ==================================================================
         if mean_return > 0.001 and volatility < 0.02:
             return "Bull Market - Low Volatility"
         elif mean_return > 0.001 and volatility >= 0.02:
