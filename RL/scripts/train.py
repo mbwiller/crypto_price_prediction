@@ -40,6 +40,7 @@ def main():
     parser.add_argument('--output', type=str, default='outputs', help='Output directory')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--resume', type=str, default=None, help='Path to a saved agent checkpoint to resume training from')
     
     args = parser.parse_args()
     
@@ -94,6 +95,11 @@ def main():
         agent = TDMPC2Agent(state_dim, action_dim, agent_config, args.device)
     elif args.agent == 'ensemble':
         agent = EnsembleAgent(state_dim, action_dim, agent_config, args.device)
+
+    # Resume from checkpoint if requested
+    if args.resume is not None:
+        agent.load(args.resume)
+        logger.info(f"Resumed training from checkpoint: {args.resume}")
     
     # Initialize trainer
     trainer_config = config.get('trainer', {})
@@ -111,6 +117,10 @@ def main():
         if len(all_data) * len(batch_df) >= trainer_config.get('min_train_size', 1000000):
             combined_df = pd.concat(all_data, ignore_index=True)
             results = trainer.train(combined_df, num_epochs=config.get('num_epochs', 1))
+            # Save a checkpoint of the agent after this chunk
+            ckpt_path = os.path.join(output_dir, f'checkpoint_chunk_{len(all_data)}.pth')
+            agent.save(ckpt_path)
+            logger.info(f"Saved checkpoint: {ckpt_path}")
             
             # Save intermediate results
             trainer.save_predictions(os.path.join(output_dir, f'predictions_chunk_{len(all_data)}.csv'))
@@ -122,6 +132,10 @@ def main():
     if all_data:
         combined_df = pd.concat(all_data, ignore_index=True)
         results = trainer.train(combined_df, num_epochs=config.get('num_epochs', 1))
+        # Final checkpoint
+        final_ckpt = os.path.join(output_dir, 'checkpoint_final.pth')
+        agent.save(final_ckpt)
+        logger.info(f"Saved final checkpoint: {final_ckpt}")
     
     # Save final model
     agent.save(os.path.join(output_dir, 'final_model.pth'))
