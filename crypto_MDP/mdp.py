@@ -138,6 +138,110 @@ class CryptoPricePredictionMDP:
         }
         
         return next_state, reward, done, info
+
+    def _calculate_reward(self, action: float, actual_return: float, next_row: pd.Series) -> Tuple[float, Dict]:
+        """
+        Calculate reward based on prediction accuracy
+        
+        Args:
+            action: Predicted price change (return)
+            actual_return: Actual price return
+            next_row: Next market observation
+            
+        Returns:
+            reward, reward_components dictionary
+        """
+        # Base prediction error
+        prediction_error = abs(action - actual_return)
+        base_reward = -prediction_error ** 2  # Squared error penalty
+        
+        # Calculate volatility-adjusted reward (optional)
+        if len(self.returns_history) > 14:
+            recent_volatility = np.std(list(self.returns_history)[-14:])
+            volatility_weight = 1.0 / (recent_volatility + 1e-6)
+        else:
+            volatility_weight = 1.0
+        
+        # Risk penalty (CVaR)
+        risk_penalty = 0.0
+        if len(self.returns_history) > 20:
+            returns = np.array(list(self.returns_history))
+            var_alpha = np.percentile(returns, self.cvar_alpha * 100)
+            cvar = np.mean(returns[returns <= var_alpha])
+            if abs(cvar) > self.risk_tolerance:
+                risk_penalty = -abs(cvar - self.risk_tolerance) * 10
+        
+        # Transaction cost penalty
+        position_change = abs(action)
+        transaction_penalty = -self.transaction_cost * position_change
+        
+        # Final reward
+        reward = base_reward * volatility_weight + risk_penalty + transaction_penalty
+        
+        reward_components = {
+            'base_reward': base_reward,
+            'volatility_weight': volatility_weight,
+            'risk_penalty': risk_penalty,
+            'transaction_penalty': transaction_penalty,
+            'prediction_error': prediction_error
+        }
+        
+        return reward, reward_components
+
+    def _calculate_microstructure(self, current_row: pd.Series):
+        """Calculate market microstructure features"""
+        from types import SimpleNamespace
+        
+        # Extract order book features
+        bid_qty = current_row.get('bid_qty', 0)
+        ask_qty = current_row.get('ask_qty', 0)
+        buy_qty = current_row.get('buy_qty', 0)
+        sell_qty = current_row.get('sell_qty', 0)
+        volume = current_row.get('volume', 0)
+        
+        # Calculate imbalances
+        bid_ask_imbalance = (bid_qty - ask_qty) / (bid_qty + ask_qty + 1e-8)
+        order_flow_imbalance = (buy_qty - sell_qty) / (buy_qty + sell_qty + 1e-8)
+        
+        # Estimate spread (simplified)
+        if len(self.price_history) > 1:
+            price_changes = np.diff(list(self.price_history))
+            bid_ask_spread = np.std(price_changes) * 2  # Rough estimate
+        else:
+            bid_ask_spread = 0.001
+        
+        # Kyle lambda (simplified price impact)
+        if volume > 0 and len(self.price_history) > 1:
+            price_change = self.price_history[-1] - self.price_history[-2]
+            kyle_lambda = abs(price_change) / (volume + 1e-8)
+        else:
+            kyle_lambda = 0.0
+        
+        # Volume imbalance ratio
+        if len(self.volume_history) > 10:
+            avg_volume = np.mean(list(self.volume_history)[-10:])
+            volume_imbalance_ratio = volume / (avg_volume + 1e-8)
+        else:
+            volume_imbalance_ratio = 1.0
+        
+        # Depth imbalance (simplified)
+        depth_imbalance = bid_ask_imbalance  # Can be enhanced with multi-level data
+        
+        # Microprice
+        current_price = current_row.get('close', self.price_history[-1] if self.price_history else 0)
+        micro_price = current_price + bid_ask_spread * bid_ask_imbalance / 2
+        weighted_mid_price = current_price  # Simplified
+        
+        return SimpleNamespace(
+            bid_ask_spread=bid_ask_spread,
+            bid_ask_imbalance=bid_ask_imbalance,
+            order_flow_imbalance=order_flow_imbalance,
+            kyle_lambda=kyle_lambda,
+            volume_imbalance_ratio=volume_imbalance_ratio,
+            depth_imbalance=depth_imbalance,
+            micro_price=micro_price,
+            weighted_mid_price=weighted_mid_price
+        )
     
     def _get_state(self, current_row: pd.Series) -> np.ndarray:
         """Construct comprehensive state representation"""
