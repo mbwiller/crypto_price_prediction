@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from collections import deque
+from typing import Dict, Any
+from .base_agent import BaseAgent
 
 class Encoder(nn.Module):
     """Encodes raw state s -> latent z"""
@@ -92,40 +94,52 @@ class ReplayBuffer:
         batch = [self.buffer[i] for i in idx]
         return map(np.stack, zip(*batch))
 
-class TD_MPC2Agent:
+class TDMPC2Agent(BaseAgent):
     """TD-M(PC)^2 agent: model-based RL with policy constraint"""
-    def __init__(self, env, latent_dim=32, horizon=5, device='cpu'):
-        self.env = env
-        obs_dim = env.observation_space.shape[0]
-        action_dim = env.action_space.shape[0]
-        self.device = device
-        # networks
-        self.encoder = Encoder(obs_dim, latent_dim).to(device)
-        self.dynamics = DynamicsModel(latent_dim, action_dim).to(device)
-        self.reward_model = RewardModel(latent_dim, action_dim).to(device)
-        self.q1 = QNetwork(latent_dim, action_dim).to(device)
-        self.q2 = QNetwork(latent_dim, action_dim).to(device)
-        self.q1_target = QNetwork(latent_dim, action_dim).to(device)
-        self.q2_target = QNetwork(latent_dim, action_dim).to(device)
-        self.policy = Policy(latent_dim, action_dim).to(device)
-        # copy targets
+    def __init__(self, state_dim: int, action_dim: int, config: Dict[str, Any], device: str = 'cpu'):
+        super().__init__(state_dim, action_dim, config, device)
+        # Hyperparameters from config
+        latent_dim = config.get('latent_dim', 32)
+        self.horizon = config.get('horizon', 5)
+        # Device
+        self.device = self.device  # inherited from BaseAgent
+        # Replay buffer
+        self.buffer = deque(maxlen=config.get('buffer_size', 1_000_000))
+
+        # Build networks using state_dim / action_dim
+        self.encoder = Encoder(state_dim, latent_dim).to(self.device)
+        self.dynamics = DynamicsModel(latent_dim, action_dim).to(self.device)
+        self.reward_model = RewardModel(latent_dim, action_dim).to(self.device)
+        self.q1 = QNetwork(latent_dim, action_dim).to(self.device)
+        self.q2 = QNetwork(latent_dim, action_dim).to(self.device)
+        self.q1_target = QNetwork(latent_dim, action_dim).to(self.device)
+        self.q2_target = QNetwork(latent_dim, action_dim).to(self.device)
+        self.policy = Policy(latent_dim, action_dim).to(self.device)
+        # Copy targets
         self.q1_target.load_state_dict(self.q1.state_dict())
         self.q2_target.load_state_dict(self.q2.state_dict())
-        # optimizers
+
+        # Optimizers
+        lr_model = config.get('lr_model', 1e-3)
+        lr_value = config.get('lr_value', 1e-3)
+        lr_policy = config.get('lr_policy', 1e-4)
         self.model_optimizer = optim.Adam(
             list(self.encoder.parameters()) +
             list(self.dynamics.parameters()) +
-            list(self.reward_model.parameters()), lr=1e-3)
+            list(self.reward_model.parameters()),
+            lr=lr_model
+        )
         self.value_optimizer = optim.Adam(
-            list(self.q1.parameters()) + list(self.q2.parameters()), lr=1e-3)
-        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=1e-4)
-        # replay buffer
-        self.buffer = ReplayBuffer()
-        # hyperparams
-        self.gamma = 0.99
-        self.rho = 0.995  # polyak
-        self.alpha = 0.1  # entropy reg
-        self.beta = 0.1   # policy constraint reg
+            list(self.q1.parameters()) + list(self.q2.parameters()),
+            lr=lr_value
+        )
+        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=lr_policy)
+
+        # Other hyperparameters
+        self.gamma = config.get('gamma', 0.99)
+        self.rho = config.get('rho', 0.995)
+        self.alpha = config.get('alpha', 0.1)
+        self.beta = config.get('beta', 0.1)
         self.horizon = horizon
 
     def plan_action(self, s):
@@ -157,17 +171,17 @@ class TD_MPC2Agent:
         """One gradient step: model, Q, policy"""
         s, a, mu, r, s2 = self.buffer.sample(batch_size)
         # to tensors
-        s  = torch.from_numpy(s).float().to(self.device)
-        a  = torch.from_numpy(a).float().to(self.device)
+        s = torch.from_numpy(s).float().to(self.device)
+        a = torch.from_numpy(a).float().to(self.device)
         mu = torch.from_numpy(mu).float().to(self.device)
-        r  = torch.from_numpy(r).float().to(self.device)
+        r = torch.from_numpy(r).float().to(self.device)
         s2 = torch.from_numpy(s2).float().to(self.device)
         # encode
-        z  = self.encoder(s)
+        z = self.encoder(s)
         z2 = self.encoder(s2).detach()
         # model losses (eq 3)
         z2_pred = self.dynamics(z, a)
-        r_pred  = self.reward_model(z, a)
+        r_pred = self.reward_model(z, a)
         # target Q for model loss
         with torch.no_grad():
             q1_next = self.q1_target(z2, self.policy.sample(z2)[0])
@@ -192,7 +206,7 @@ class TD_MPC2Agent:
         a_pi, logp_pi = self.policy.sample(z)
         q1_pi = self.q1(z, a_pi)
         q2_pi = self.q2(z, a_pi)
-        q_pi  = torch.min(q1_pi, q2_pi)
+        q_pi = torch.min(q1_pi, q2_pi)
         # policy loss: maximize Q - alpha*entropy + beta*log mu
         log_mu = torch.log(torch.clamp(mu, 1e-6, 1.0))
         policy_loss = -(q_pi - self.alpha * logp_pi + self.beta * log_mu).mean()
@@ -227,3 +241,13 @@ class TD_MPC2Agent:
         """Return action given observation s (for meta-env usage)"""
         a = self.plan_action(s)
         return np.array([a]), None
+
+    # --- Adapter to BaseAgent API ---
+    def select_action(self, state: np.ndarray, deterministic: bool = False) -> np.ndarray:
+        """Conform to BaseAgent: wrap predict()"""
+        action, _ = self.predict(state)
+        return action
+
+    def update(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
+        """No-op or custom training — we typically freeze this expert."""
+        return {}
