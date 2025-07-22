@@ -5,6 +5,7 @@ from sklearn.preprocessing import RobustScaler
 from scipy import stats
 from .indicators import TechnicalIndicators
 from .regime import VolatilityRegimeDetector
+from typing import Dict, Tuple, List, Optional
 
 class CryptoPricePredictionMDP:
     """
@@ -242,6 +243,18 @@ class CryptoPricePredictionMDP:
             micro_price=micro_price,
             weighted_mid_price=weighted_mid_price
         )
+
+    def _default_regime(self) -> Dict[str, float]:
+    """Return default regime features when insufficient data"""
+    return {
+        'vol_short': 0.3,
+        'vol_long': 0.3,
+        'vol_ratio': 1.0,
+        'ewma_vol': 0.3,
+        'is_high_vol': 0.0,
+        'is_trending': 0.0,
+        'vol_of_vol': 0.0
+    }
     
     def _get_state(self, current_row: pd.Series) -> np.ndarray:
         """Construct comprehensive state representation"""
