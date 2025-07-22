@@ -18,7 +18,7 @@ class CryptoPricePredictionMDP:
         self.lookback_window = lookback_window
         self.prediction_horizon = prediction_horizon
         self.use_proprietary_features = use_proprietary_features
-        self.risk_free_rate = risk_free_rate / (252 * 24 * 60)  # Per minute
+        self.risk_free_rate = risk_free_rate / (365 * 24 * 60)  # Per minute
         self.transaction_cost = transaction_cost
         self.max_position = max_position
         self.cvar_alpha = cvar_alpha
@@ -71,7 +71,7 @@ class CryptoPricePredictionMDP:
         # Initialize with historical data
         for idx in range(min(len(initial_data), self.lookback_window)):
             row = initial_data.iloc[idx]
-            self.price_history.append(row['close'] if 'close' in row else row['volume'])
+            self.price_history.append(row['close'])
             self.volume_history.append(row['volume'])
             self.high_history.append(row.get('high', row['volume']))
             self.low_history.append(row.get('low', row['volume']))
@@ -100,8 +100,8 @@ class CryptoPricePredictionMDP:
         self.action_history.append(action)
         
         # Update price history
-        current_price = self.price_history[-1] if self.price_history else next_row['volume']
-        next_price = next_row['volume']  # Using volume as proxy for price
+        current_price = self.price_history[-1]
+        next_price = next_row['close']
         actual_return = (next_price - current_price) / current_price
         
         # Calculate reward
@@ -148,7 +148,11 @@ class CryptoPricePredictionMDP:
             microstructure.micro_price,
             microstructure.weighted_mid_price
         ])
+
         
+# ==========================================================
+# GO THROUGH THESE BELOW!!!!!
+# ==========================================================
         # 2. Price Information & Returns
         if len(self.price_history) > 1:
             returns = np.array(self.returns_history)
@@ -158,6 +162,51 @@ class CryptoPricePredictionMDP:
         
         # Calculate CVaR (expected value of returns below VaR)
         cvar = np.mean(returns[returns <= var_alpha])
+
+        if abs(cvar) > self.risk_tolerance:
+            penalty = (abs(cvar) - self.risk_tolerance) * 10
+        else:
+            penalty = 0.0
+        state_components.append(penalty)
+
+        # 3. [Optional] Technical indicators
+        tech_feats = self.tech_indicators.calculate_indicators(
+            self.volume_history,
+            np.array(self.high_history),
+            np.array(self.low_history),
+            np.array(self.price_history)      # using price as close
+        )
+        state_components.extend(tech_feats.values())
+
+        # 4. Volatility regime
+        vol_reg = self.vol_regime.detect_regime(np.array(self.returns_history))
+        state_components.extend(vol_reg.values())
+
+        # 5. [Placeholder for MarketRegimeClassifier & other indicators…]
+        #    state_components.extend(market_regime_feats)
+
+        # 6. Proprietary features if enabled
+        if self.use_proprietary_features:
+            prop = [current_row[f'X_{i}'] for i in range(1,781)]
+            state_components.extend(prop)
+
+        # 7. Final assembly
+        state = np.array(state_components, dtype=float)
+
+        # 8. Record the dimension once
+        if self.state_dim is None:
+            self.state_dim = state.shape[0]
+
+        # 9. [Optional] Scale
+        # if not self.is_fitted:
+        #     self.state_scaler.fit(state.reshape(1,-1))
+        #     self.is_fitted = True
+        # state = self.state_scaler.transform(state.reshape(1,-1))[0]
+
+        return state
+
+
+
         
         # Penalty if CVaR exceeds risk tolerance
         if abs(cvar) > self.risk_tolerance:
@@ -166,11 +215,25 @@ class CryptoPricePredictionMDP:
             penalty = 0.0
         
         return penalty
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     
     def _update_histories(self, row: pd.Series):
         """Update all history buffers"""
         
-        self.price_history.append(row.get('close', row['volume']))
+        self.price_history.append(row['close'])
         self.volume_history.append(row['volume'])
         self.high_history.append(row.get('high', row['volume']))
         self.low_history.append(row.get('low', row['volume']))
