@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 from .base_agent import BaseAgent
@@ -185,13 +186,20 @@ class EnsembleAgent(BaseAgent):
             meta_states.append(meta_state)
         
         meta_states = torch.FloatTensor(np.array(meta_states)).to(self.device)
+
+        # Rebuild next_meta_states just like we did for states
+        next_np = batch['next_states'].cpu().numpy()
+        next_meta = []
+        for i in range(len(next_np)):
+            bp = self.get_base_predictions(next_np[i], deterministic=True)
+            next_meta.append(self.construct_meta_state(next_np[i], bp))
+        next_meta = torch.FloatTensor(np.array(next_meta)).to(self.device)
         
-        # Create meta-batch
         meta_batch = {
             'states': meta_states,
             'actions': batch['actions'],
             'rewards': batch['rewards'],
-            'next_states': batch['next_states'],  # TODO: should also be meta-states
+            'next_states': next_meta,
             'dones': batch['dones']
         }
         
