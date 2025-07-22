@@ -1,3 +1,8 @@
+import numpy as np
+import pandas as pd
+from typing import Dict
+from collections import deque
+
 class VolatilityRegimeDetector:
     """Detect and classify market volatility regimes"""
     
