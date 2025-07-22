@@ -59,13 +59,11 @@ class SACAgent(BaseAgent):
     def select_action(self, state: np.ndarray, deterministic: bool = False) -> np.ndarray:
         """Select action using current policy"""
         state_tensor = self.to_tensor(state).unsqueeze(0)
-        
+
         with torch.no_grad():
-            if deterministic:
-                _, _, action = self.actor.sample(state_tensor)
-            else:
-                action, _, _ = self.actor.sample(state_tensor)
-        
+            # sample() returns (stochastic_action, log_prob, mean_action)
+            stoch_action, _, mean_action = self.actor.sample(state_tensor)
+            action = mean_action if deterministic else stoch_action        
         return action.cpu().numpy()[0]
     
     def update(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
@@ -136,7 +134,7 @@ class SACAgent(BaseAgent):
             'critic_target': self.critic_target.state_dict(),
             'actor_optimizer': self.actor_optimizer.state_dict(),
             'critic_optimizer': self.critic_optimizer.state_dict(),
-            'log_alpha': self.log_alpha if self.automatic_entropy_tuning else None,
+            'log_alpha': self.log_alpha.item() if self.automatic_entropy_tuning else None,
             'alpha_optimizer': self.alpha_optimizer.state_dict() if self.automatic_entropy_tuning else None,
             'training_steps': self.training_steps,
             'config': self.config
@@ -152,7 +150,8 @@ class SACAgent(BaseAgent):
         self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer'])
         
         if self.automatic_entropy_tuning and checkpoint['log_alpha'] is not None:
-            self.log_alpha = checkpoint['log_alpha']
+            # restore scalar log_alpha
+            self.log_alpha = torch.tensor([checkpoint['log_alpha']], requires_grad=True, device=self.device)
             self.alpha_optimizer.load_state_dict(checkpoint['alpha_optimizer'])
             self.alpha = self.log_alpha.exp()
         
