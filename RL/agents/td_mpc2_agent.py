@@ -140,7 +140,7 @@ class TDMPC2Agent(BaseAgent):
         self.rho = config.get('rho', 0.995)
         self.alpha = config.get('alpha', 0.1)
         self.beta = config.get('beta', 0.1)
-        self.horizon = horizon
+        self.horizon = config.get('horizon', 5)
 
     def plan_action(self, s):
         """MPPI planning in latent space: returns first action a_t"""

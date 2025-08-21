@@ -1,3 +1,8 @@
+import numpy as np
+from typing import Dict, Tuple
+from sklearn.feature_selection import mutual_info_regression, f_regression
+from sklearn.ensemble import RandomForestRegressor
+
 class FeatureSelector:
     """
     Advanced feature selection for identifying most predictive proprietary features
@@ -18,9 +23,6 @@ class FeatureSelector:
             y: Target labels (n_samples,)
         """
         
-        from sklearn.feature_selection import mutual_info_regression, f_regression
-        from sklearn.ensemble import RandomForestRegressor
-        
         # 1. Mutual Information
         mi_scores = mutual_info_regression(X, y, random_state=42)
         
@@ -40,18 +42,11 @@ class FeatureSelector:
         corr_scores = np.abs(np.array(raw_corrs))
 
         # Normalize scores
-        def _minmax(self, arr):
-            lo, hi = arr.min(), arr.max()
-            return (arr - lo) / (hi - lo + 1e-8)
-        
         mi_scores   = self._minmax(mi_scores)
         f_scores    = self._minmax(f_scores)
         rf_scores   = self._minmax(rf_scores)
         corr_scores = self._minmax(corr_scores)
 
-# =========================================================================
-# MAKE SURE WE HAVE self.weights INITIALIZED IN A CONFIG FILE OR SOMETHING
-# =========================================================================
         w_mi, w_f, w_rf, w_corr = self.weights
         self.feature_scores = (
             w_mi * mi_scores +
@@ -64,6 +59,11 @@ class FeatureSelector:
         self.selected_indices = np.argsort(self.feature_scores)[-self.n_features:][::-1]
         
         return self
+    
+    def _minmax(self, arr):
+        """Min-max normalize array"""
+        lo, hi = arr.min(), arr.max()
+        return (arr - lo) / (hi - lo + 1e-8)
     
     def transform(self, X: np.ndarray) -> np.ndarray:
         """Transform features to selected subset"""

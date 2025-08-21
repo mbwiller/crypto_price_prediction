@@ -152,10 +152,25 @@ class EnsembleAgent(BaseAgent):
                 weights = self.meta_network(meta_state_tensor)
                 weights = F.softmax(weights, dim=-1).cpu().numpy()[0]
             
-            # Weighted average of base predictions
+            # Weighted average of base predictions - fix shape issues
             weighted_action = np.zeros_like(meta_action)
             for i, name in enumerate(sorted(self.base_agents.keys())):
-                weighted_action += weights[i] * base_predictions[name]
+                base_pred = base_predictions[name]
+                
+                # Ensure consistent shapes
+                if isinstance(base_pred, np.ndarray):
+                    if base_pred.ndim == 0:  # scalar
+                        base_pred = np.array([base_pred])
+                    elif base_pred.shape == ():  # 0-d array
+                        base_pred = np.array([base_pred])
+                else:  # not array
+                    base_pred = np.array([base_pred])
+                
+                # Ensure weight is scalar
+                weight = float(weights[i])
+                
+                # Perform weighted sum with proper broadcasting
+                weighted_action = weighted_action + weight * base_pred
             
             # Blend meta-agent and weighted predictions
             blend_factor = self.config.get('blend_factor', 0.5)
@@ -215,16 +230,42 @@ class EnsembleAgent(BaseAgent):
             weights = self.meta_network(meta_states)
             weights = F.softmax(weights, dim=-1)
             
-            # Get base predictions for batch
+            # Get base predictions for batch with consistent shapes
             base_preds_batch = []
             for name in sorted(self.base_agents.keys()):
                 agent_preds = []
                 for i in range(len(states)):
                     pred = self.base_agents[name].select_action(states[i], deterministic=True)
+                    
+                    # Ensure consistent shape - convert to 1D array
+                    if isinstance(pred, np.ndarray):
+                        if pred.ndim == 0:  # scalar
+                            pred = np.array([pred])
+                        elif pred.ndim > 1:  # multi-dimensional
+                            pred = pred.flatten()
+                    else:  # not an array
+                        pred = np.array([pred])
+                    
                     agent_preds.append(pred)
-                base_preds_batch.append(torch.FloatTensor(agent_preds).to(self.device))
+                
+                # Convert to tensor and ensure shape [batch_size, action_dim]
+                agent_preds_tensor = torch.FloatTensor(agent_preds).to(self.device)
+                if agent_preds_tensor.dim() == 1:
+                    agent_preds_tensor = agent_preds_tensor.unsqueeze(1)
+                elif agent_preds_tensor.dim() > 2:
+                    agent_preds_tensor = agent_preds_tensor.view(len(states), -1)
+                
+                base_preds_batch.append(agent_preds_tensor)
             
-            base_preds_batch = torch.stack(base_preds_batch, dim=1)
+            # Stack tensors - all should now have shape [batch_size, action_dim]
+            try:
+                base_preds_batch = torch.stack(base_preds_batch, dim=1)
+            except RuntimeError as e:
+                # If stacking still fails, use a different approach
+                self.logger.warning(f"Could not stack base predictions: {e}")
+                # Skip meta-network update for this batch
+                self.training_steps += 1
+                return losses
             
             # Weighted prediction
             weighted_pred = (weights.unsqueeze(-1) * base_preds_batch).sum(dim=1)

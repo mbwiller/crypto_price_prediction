@@ -48,13 +48,38 @@ class PPOAgent(BaseAgent):
         return action.cpu().numpy()[0]
 
     def _compute_gae(self, rewards, dones, values, next_values):
+        """Compute Generalized Advantage Estimation with proper tensor handling"""
+        # Ensure all tensors have consistent shapes
+        rewards = rewards.squeeze()  # Remove extra dimensions
+        dones = dones.squeeze()
+        values = values.squeeze()
+        next_values = next_values.squeeze()
+        
+        # Ensure all are 1D tensors
+        if rewards.dim() == 0:
+            rewards = rewards.unsqueeze(0)
+        if dones.dim() == 0:
+            dones = dones.unsqueeze(0)
+        if values.dim() == 0:
+            values = values.unsqueeze(0)
+        if next_values.dim() == 0:
+            next_values = next_values.unsqueeze(0)
+        
+        # Compute TD errors
         deltas = rewards + self.gamma * (1 - dones) * next_values - values
+        
+        # Initialize advantages tensor with same shape as rewards
         adv = torch.zeros_like(rewards)
         gae = 0
+        
+        # Compute GAE backwards through time
         for t in reversed(range(len(rewards))):
             gae = deltas[t] + self.gamma * self.lam * (1 - dones[t]) * gae
             adv[t] = gae
+        
+        # Compute returns
         returns = adv + values
+        
         return adv, returns
 
     def update(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:

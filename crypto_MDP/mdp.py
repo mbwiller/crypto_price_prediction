@@ -13,15 +13,9 @@ class CryptoPricePredictionMDP:
     Implements hierarchical state representation with multi-dimensional features
     """
     
-    def __init__(self, 
-                 lookback_window: int = 100,
-                 prediction_horizon: int = 1,
-                 use_proprietary_features: bool = True,
-                 risk_free_rate: float = 0.02,
-                 transaction_cost: float = 0.001,
-                 max_position: float = 1.0,
-                 cvar_alpha: float = 0.05,
-                 risk_tolerance: float = 0.1):
+    def __init__(self, lookback_window: int = 100, prediction_horizon: int = 1, use_proprietary_features: bool = True, 
+                 risk_free_rate: float = 0.02, transaction_cost: float = 0.001, max_position: float = 1.0,
+                 cvar_alpha: float = 0.05, risk_tolerance: float = 0.1):
         
         # Environment parameters
         self.lookback_window = lookback_window
@@ -245,16 +239,16 @@ class CryptoPricePredictionMDP:
         )
 
     def _default_regime(self) -> Dict[str, float]:
-    """Return default regime features when insufficient data"""
-    return {
-        'vol_short': 0.3,
-        'vol_long': 0.3,
-        'vol_ratio': 1.0,
-        'ewma_vol': 0.3,
-        'is_high_vol': 0.0,
-        'is_trending': 0.0,
-        'vol_of_vol': 0.0
-    }
+        """Return default regime features when insufficient data"""
+        return {
+            'vol_short': 0.3,
+            'vol_long': 0.3,
+            'vol_ratio': 1.0,
+            'ewma_vol': 0.3,
+            'is_high_vol': 0.0,
+            'is_trending': 0.0,
+            'vol_of_vol': 0.0
+        }
     
     def _get_state(self, current_row: pd.Series) -> np.ndarray:
         """Construct comprehensive state representation"""
@@ -312,7 +306,15 @@ class CryptoPricePredictionMDP:
 
         # 6. Proprietary features if enabled
         if self.use_proprietary_features:
-            prop = [current_row[f'X_{i}'] for i in range(1,781)]
+            prop = []
+            for i in range(1, 781):
+                # .get(key, default) will return `default` rather than KeyError
+                val = current_row.get(f"X_{i}", None)
+                # if it really isn’t there, you can choose a sensible default
+                if val is None:
+                    # e.g. zero, or np.nan, or even compute it on the fly
+                    val = 0.0
+                prop.append(val)
             state_components.extend(prop)
 
         # 7. Final assembly
